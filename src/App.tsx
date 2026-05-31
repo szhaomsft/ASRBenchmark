@@ -1047,8 +1047,6 @@ function buildBugTurnExportSummary(turn: Turn, turnNumber: number) {
     sizeBytes: turn.sizeBytes,
     audioFile: 'audio.wav',
     benchmarkUrl: BENCHMARK_URL,
-    commit: GIT_COMMIT,
-    commitUrl: COMMIT_URL,
     results: Object.fromEntries(
       MODELS.map((model) => {
         const result = turn.results[model.id];
@@ -1106,7 +1104,6 @@ function formatBugResultText(summary: ReturnType<typeof buildBugTurnExportSummar
     `Duration: ${summary.durationSeconds}s`,
     `Size: ${summary.sizeBytes} bytes`,
     `Benchmark URL: ${summary.benchmarkUrl}`,
-    `Commit: ${summary.commitUrl}`,
     '',
     'Model outputs:',
     '',
@@ -1149,7 +1146,6 @@ async function buildBugEmailDraft(
     `Source: ${turn.sourceName}`,
     `Recorded: ${recordedAt}`,
     `Benchmark URL: ${BENCHMARK_URL}`,
-    `Commit: ${COMMIT_URL}`,
     '',
     textSummary,
     '',
