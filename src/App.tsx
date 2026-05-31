@@ -434,7 +434,7 @@ function App() {
       <section className="hero">
         <div>
           <p className="eyebrow">Azure Speech ASR benchmark</p>
-          <h1>Record once, compare three transcribers side by side.</h1>
+          <h1>Record once, compare four transcribers side by side.</h1>
           <p className="subtitle">
             The page records microphone input, converts the turn to 16 kHz WAV, sends it to Fast
             Transcription, MAI Transcribe, LLM Speech, and ElevenLabs STT in parallel, then keeps each turn in a list.
