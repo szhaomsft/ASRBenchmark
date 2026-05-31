@@ -428,7 +428,6 @@ function App() {
       setIsPreparingBugEmail(true);
       setRecordingError('');
       const emailDraft = await buildBugEmailDraft(latestTurn, turns.length);
-      openDefaultEmailClient(emailDraft.subject, emailDraft.mailtoBody);
       downloadBlob(emailDraft.blob, `asr-bug-turn-${String(turns.length).padStart(3, '0')}.eml`);
     } catch (error) {
       setRecordingError(error instanceof Error ? error.message : 'Failed to create bug email draft.');
@@ -1130,7 +1129,7 @@ function formatBugResultText(summary: ReturnType<typeof buildBugTurnExportSummar
 async function buildBugEmailDraft(
   turn: Turn,
   turnNumber: number,
-): Promise<{ blob: Blob; subject: string; mailtoBody: string }> {
+): Promise<{ blob: Blob }> {
   const summary = buildBugTurnExportSummary(turn, turnNumber);
   const textSummary = formatBugResultText(summary);
   const boundary = `asr_bug_${crypto.randomUUID()}`;
@@ -1147,8 +1146,6 @@ async function buildBugEmailDraft(
     `Source: ${turn.sourceName}`,
     `Recorded: ${recordedAt}`,
     `Commit: ${COMMIT_URL}`,
-    '',
-    'mailto cannot attach files automatically, so the app also downloads an .eml draft with attachments.',
     '',
     textSummary,
     '',
@@ -1199,19 +1196,7 @@ async function buildBugEmailDraft(
 
   return {
     blob: new Blob([email], { type: 'message/rfc822' }),
-    subject,
-    mailtoBody: body,
   };
-}
-
-function openDefaultEmailClient(subject: string, body: string): void {
-  const href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  const anchor = document.createElement('a');
-  anchor.href = href;
-  anchor.style.display = 'none';
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
