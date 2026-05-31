@@ -89,6 +89,7 @@ const MODELS: SpeechModel[] = [
 
 const MAI_TRANSCRIBE_MODEL = 'mai-transcribe-1.5';
 const ELEVENLABS_TRANSCRIBE_MODEL = 'scribe_v2';
+const AZURE_MODEL_IDS: ModelId[] = ['fast', 'mai', 'llm'];
 
 const DEFAULT_RESULTS: Record<ModelId, ModelResult> = {
   fast: { state: 'idle' },
@@ -127,6 +128,7 @@ function App() {
   const [recordingError, setRecordingError] = useState('');
   const [warmupText, setWarmupText] = useState('Connection warm-up has not started.');
   const [isExportingZip, setIsExportingZip] = useState(false);
+  const [isPreparingBugEmail, setIsPreparingBugEmail] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -417,6 +419,24 @@ function App() {
     }
   };
 
+  const exportLatestTurnBugEmail = async () => {
+    const latestTurn = turns[0];
+    if (!latestTurn || isPreparingBugEmail) {
+      return;
+    }
+
+    try {
+      setIsPreparingBugEmail(true);
+      setRecordingError('');
+      const emailBlob = await buildBugEmailDraft(latestTurn, turns.length);
+      downloadBlob(emailBlob, `asr-bug-turn-${String(turns.length).padStart(3, '0')}.eml`);
+    } catch (error) {
+      setRecordingError(error instanceof Error ? error.message : 'Failed to create bug email draft.');
+    } finally {
+      setIsPreparingBugEmail(false);
+    }
+  };
+
   const newestTurnStatus = useMemo(() => {
     const latest = turns[0];
     if (!latest) {
@@ -530,10 +550,21 @@ function App() {
           <p>Each row keeps the captured WAV and all three model outputs.</p>
         </div>
         <div className="turn-actions">
+          <button
+            className="secondary-button"
+            onClick={exportLatestTurnBugEmail}
+            disabled={turns.length === 0 || isPreparingBugEmail}
+          >
+            {isPreparingBugEmail ? 'Preparing...' : 'Email latest bug'}
+          </button>
           <button className="secondary-button" onClick={exportTurnsZip} disabled={turns.length === 0 || isExportingZip}>
             {isExportingZip ? 'Exporting...' : 'Export ZIP'}
           </button>
-          <button className="secondary-button" onClick={clearTurns} disabled={turns.length === 0 || isBusy || isExportingZip}>
+          <button
+            className="secondary-button"
+            onClick={clearTurns}
+            disabled={turns.length === 0 || isBusy || isExportingZip || isPreparingBugEmail}
+          >
             Clear list
           </button>
         </div>
@@ -1006,6 +1037,40 @@ function buildTurnExportSummary(turn: Turn, turnNumber: number) {
   };
 }
 
+function buildAzureTurnExportSummary(turn: Turn, turnNumber: number) {
+  return {
+    turnNumber,
+    id: turn.id,
+    sourceName: turn.sourceName,
+    recordedAt: new Date(turn.recordedAt).toISOString(),
+    durationSeconds: turn.durationSeconds,
+    sizeBytes: turn.sizeBytes,
+    audioFile: 'audio.wav',
+    commit: GIT_COMMIT,
+    commitUrl: COMMIT_URL,
+    results: Object.fromEntries(
+      AZURE_MODEL_IDS.map((modelId) => {
+        const model = MODELS.find((candidate) => candidate.id === modelId);
+        const result = turn.results[modelId];
+        return [
+          modelId,
+          {
+            modelName: model?.name ?? modelId,
+            description: model?.description ?? '',
+            state: result.state,
+            latencyMs: result.elapsedMs ?? null,
+            error: result.error ?? null,
+            fullText: result.transcript?.fullText ?? '',
+            language: result.transcript?.language ?? null,
+            durationMs: result.transcript?.duration ?? null,
+            segments: result.transcript?.segments ?? [],
+          },
+        ];
+      }),
+    ),
+  };
+}
+
 function formatTurnResultText(summary: ReturnType<typeof buildTurnExportSummary>): string {
   const lines = [
     `Turn ${summary.turnNumber}`,
@@ -1031,6 +1096,128 @@ function formatTurnResultText(summary: ReturnType<typeof buildTurnExportSummary>
   }
 
   return `${lines.join('\n')}\n`;
+}
+
+function formatAzureBugResultText(summary: ReturnType<typeof buildAzureTurnExportSummary>): string {
+  const lines = [
+    `ASR Benchmark bug report - Turn ${summary.turnNumber}`,
+    `Source: ${summary.sourceName}`,
+    `Recorded: ${summary.recordedAt}`,
+    `Duration: ${summary.durationSeconds}s`,
+    `Size: ${summary.sizeBytes} bytes`,
+    `Commit: ${summary.commitUrl}`,
+    '',
+    'Azure model outputs:',
+    '',
+  ];
+
+  for (const modelId of AZURE_MODEL_IDS) {
+    const result = summary.results[modelId];
+    lines.push(`## ${result.modelName}`);
+    lines.push(`Description: ${result.description}`);
+    lines.push(`State: ${result.state}`);
+    lines.push(`Latency: ${result.latencyMs === null ? 'n/a' : `${result.latencyMs}ms`}`);
+    if (result.error) {
+      lines.push(`Error: ${result.error}`);
+    }
+    lines.push('Text:');
+    lines.push(result.fullText || '(empty)');
+    lines.push('');
+  }
+
+  return `${lines.join('\n')}\n`;
+}
+
+async function buildBugEmailDraft(turn: Turn, turnNumber: number): Promise<Blob> {
+  const summary = buildAzureTurnExportSummary(turn, turnNumber);
+  const textSummary = formatAzureBugResultText(summary);
+  const boundary = `asr_bug_${crypto.randomUUID()}`;
+  const audioBase64 = wrapBase64(await blobToBase64(turn.audioBlob));
+  const jsonBase64 = wrapBase64(encodeTextBase64(JSON.stringify(summary, null, 2)));
+  const textBase64 = wrapBase64(encodeTextBase64(textSummary));
+  const recordedAt = new Date(turn.recordedAt).toISOString();
+  const safeSource = sanitizeFilePart(turn.sourceName);
+  const subject = `ASR Benchmark bug - turn ${turnNumber} - ${safeSource}`;
+  const body = [
+    'Please investigate this ASR benchmark turn.',
+    '',
+    `Turn: ${turnNumber}`,
+    `Source: ${turn.sourceName}`,
+    `Recorded: ${recordedAt}`,
+    `Commit: ${COMMIT_URL}`,
+    '',
+    'Attached:',
+    '- audio.wav',
+    '- azure-results.json',
+    '- azure-results.txt',
+    '',
+  ].join('\r\n');
+
+  const email = [
+    'To: ',
+    `Subject: ${subject}`,
+    'X-Unsent: 1',
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    body,
+    '',
+    `--${boundary}`,
+    'Content-Type: audio/wav; name="audio.wav"',
+    'Content-Transfer-Encoding: base64',
+    'Content-Disposition: attachment; filename="audio.wav"',
+    '',
+    audioBase64,
+    '',
+    `--${boundary}`,
+    'Content-Type: application/json; name="azure-results.json"',
+    'Content-Transfer-Encoding: base64',
+    'Content-Disposition: attachment; filename="azure-results.json"',
+    '',
+    jsonBase64,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"; name="azure-results.txt"',
+    'Content-Transfer-Encoding: base64',
+    'Content-Disposition: attachment; filename="azure-results.txt"',
+    '',
+    textBase64,
+    '',
+    `--${boundary}--`,
+    '',
+  ].join('\r\n');
+
+  return new Blob([email], { type: 'message/rfc822' });
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const commaIndex = result.indexOf(',');
+      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read blob.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function encodeTextBase64(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
+}
+
+function wrapBase64(value: string): string {
+  return value.replace(/.{1,76}/g, '$&\r\n').trimEnd();
 }
 
 function downloadBlob(blob: Blob, fileName: string): void {
