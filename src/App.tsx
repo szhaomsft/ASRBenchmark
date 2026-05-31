@@ -72,7 +72,7 @@ const MODELS: SpeechModel[] = [
   {
     id: 'mai',
     name: 'MAI Transcribe',
-    description: 'MAI-Transcribe-1.5 through LLM Speech',
+    description: 'MAI-Transcribe-1.5',
   },
   {
     id: 'llm',
