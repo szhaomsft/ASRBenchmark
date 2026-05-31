@@ -114,6 +114,10 @@ const FAST_TRANSCRIPTION_LANGUAGES = [
 const STORAGE_KEY = 'asr-benchmark-settings';
 const WARMUP_TIMEOUT_MS = 1000;
 const WARMUP_INTERVAL_MS = 15000;
+const REPOSITORY_URL = import.meta.env.VITE_REPOSITORY_URL || 'https://github.com/szhaomsft/ASRBenchmark';
+const GIT_COMMIT = import.meta.env.VITE_GIT_COMMIT || 'local';
+const SHORT_GIT_COMMIT = GIT_COMMIT === 'local' ? GIT_COMMIT : GIT_COMMIT.slice(0, 7);
+const COMMIT_URL = GIT_COMMIT === 'local' ? REPOSITORY_URL : `${REPOSITORY_URL}/commit/${GIT_COMMIT}`;
 
 function App() {
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
@@ -440,6 +444,15 @@ function App() {
             Transcription, MAI Transcribe, LLM Speech, and ElevenLabs STT in parallel, then keeps each turn in a list.
             Model pipes are pre-warmed and kept active to reduce first-request latency.
           </p>
+          <div className="repo-meta">
+            <a href={REPOSITORY_URL} target="_blank" rel="noreferrer">
+              GitHub repo
+            </a>
+            <span>·</span>
+            <a href={COMMIT_URL} target="_blank" rel="noreferrer">
+              commit {SHORT_GIT_COMMIT}
+            </a>
+          </div>
         </div>
         <div className="hero-card">
           <button
