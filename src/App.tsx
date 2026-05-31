@@ -89,7 +89,6 @@ const MODELS: SpeechModel[] = [
 
 const MAI_TRANSCRIBE_MODEL = 'mai-transcribe-1.5';
 const ELEVENLABS_TRANSCRIBE_MODEL = 'scribe_v2';
-const AZURE_MODEL_IDS: ModelId[] = ['fast', 'mai', 'llm'];
 
 const DEFAULT_RESULTS: Record<ModelId, ModelResult> = {
   fast: { state: 'idle' },
@@ -428,8 +427,9 @@ function App() {
     try {
       setIsPreparingBugEmail(true);
       setRecordingError('');
-      const emailBlob = await buildBugEmailDraft(latestTurn, turns.length);
-      downloadBlob(emailBlob, `asr-bug-turn-${String(turns.length).padStart(3, '0')}.eml`);
+      const emailDraft = await buildBugEmailDraft(latestTurn, turns.length);
+      openDefaultEmailClient(emailDraft.subject, emailDraft.mailtoBody);
+      downloadBlob(emailDraft.blob, `asr-bug-turn-${String(turns.length).padStart(3, '0')}.eml`);
     } catch (error) {
       setRecordingError(error instanceof Error ? error.message : 'Failed to create bug email draft.');
     } finally {
@@ -1037,7 +1037,7 @@ function buildTurnExportSummary(turn: Turn, turnNumber: number) {
   };
 }
 
-function buildAzureTurnExportSummary(turn: Turn, turnNumber: number) {
+function buildBugTurnExportSummary(turn: Turn, turnNumber: number) {
   return {
     turnNumber,
     id: turn.id,
@@ -1049,14 +1049,13 @@ function buildAzureTurnExportSummary(turn: Turn, turnNumber: number) {
     commit: GIT_COMMIT,
     commitUrl: COMMIT_URL,
     results: Object.fromEntries(
-      AZURE_MODEL_IDS.map((modelId) => {
-        const model = MODELS.find((candidate) => candidate.id === modelId);
-        const result = turn.results[modelId];
+      MODELS.map((model) => {
+        const result = turn.results[model.id];
         return [
-          modelId,
+          model.id,
           {
-            modelName: model?.name ?? modelId,
-            description: model?.description ?? '',
+            modelName: model.name,
+            description: model.description,
             state: result.state,
             latencyMs: result.elapsedMs ?? null,
             error: result.error ?? null,
@@ -1098,7 +1097,7 @@ function formatTurnResultText(summary: ReturnType<typeof buildTurnExportSummary>
   return `${lines.join('\n')}\n`;
 }
 
-function formatAzureBugResultText(summary: ReturnType<typeof buildAzureTurnExportSummary>): string {
+function formatBugResultText(summary: ReturnType<typeof buildBugTurnExportSummary>): string {
   const lines = [
     `ASR Benchmark bug report - Turn ${summary.turnNumber}`,
     `Source: ${summary.sourceName}`,
@@ -1107,12 +1106,12 @@ function formatAzureBugResultText(summary: ReturnType<typeof buildAzureTurnExpor
     `Size: ${summary.sizeBytes} bytes`,
     `Commit: ${summary.commitUrl}`,
     '',
-    'Azure model outputs:',
+    'Model outputs:',
     '',
   ];
 
-  for (const modelId of AZURE_MODEL_IDS) {
-    const result = summary.results[modelId];
+  for (const model of MODELS) {
+    const result = summary.results[model.id];
     lines.push(`## ${result.modelName}`);
     lines.push(`Description: ${result.description}`);
     lines.push(`State: ${result.state}`);
@@ -1128,9 +1127,12 @@ function formatAzureBugResultText(summary: ReturnType<typeof buildAzureTurnExpor
   return `${lines.join('\n')}\n`;
 }
 
-async function buildBugEmailDraft(turn: Turn, turnNumber: number): Promise<Blob> {
-  const summary = buildAzureTurnExportSummary(turn, turnNumber);
-  const textSummary = formatAzureBugResultText(summary);
+async function buildBugEmailDraft(
+  turn: Turn,
+  turnNumber: number,
+): Promise<{ blob: Blob; subject: string; mailtoBody: string }> {
+  const summary = buildBugTurnExportSummary(turn, turnNumber);
+  const textSummary = formatBugResultText(summary);
   const boundary = `asr_bug_${crypto.randomUUID()}`;
   const audioBase64 = wrapBase64(await blobToBase64(turn.audioBlob));
   const jsonBase64 = wrapBase64(encodeTextBase64(JSON.stringify(summary, null, 2)));
@@ -1146,10 +1148,14 @@ async function buildBugEmailDraft(turn: Turn, turnNumber: number): Promise<Blob>
     `Recorded: ${recordedAt}`,
     `Commit: ${COMMIT_URL}`,
     '',
+    'mailto cannot attach files automatically, so the app also downloads an .eml draft with attachments.',
+    '',
+    textSummary,
+    '',
     'Attached:',
     '- audio.wav',
-    '- azure-results.json',
-    '- azure-results.txt',
+    '- model-results.json',
+    '- model-results.txt',
     '',
   ].join('\r\n');
 
@@ -1174,16 +1180,16 @@ async function buildBugEmailDraft(turn: Turn, turnNumber: number): Promise<Blob>
     audioBase64,
     '',
     `--${boundary}`,
-    'Content-Type: application/json; name="azure-results.json"',
+    'Content-Type: application/json; name="model-results.json"',
     'Content-Transfer-Encoding: base64',
-    'Content-Disposition: attachment; filename="azure-results.json"',
+    'Content-Disposition: attachment; filename="model-results.json"',
     '',
     jsonBase64,
     '',
     `--${boundary}`,
-    'Content-Type: text/plain; charset="UTF-8"; name="azure-results.txt"',
+    'Content-Type: text/plain; charset="UTF-8"; name="model-results.txt"',
     'Content-Transfer-Encoding: base64',
-    'Content-Disposition: attachment; filename="azure-results.txt"',
+    'Content-Disposition: attachment; filename="model-results.txt"',
     '',
     textBase64,
     '',
@@ -1191,7 +1197,21 @@ async function buildBugEmailDraft(turn: Turn, turnNumber: number): Promise<Blob>
     '',
   ].join('\r\n');
 
-  return new Blob([email], { type: 'message/rfc822' });
+  return {
+    blob: new Blob([email], { type: 'message/rfc822' }),
+    subject,
+    mailtoBody: body,
+  };
+}
+
+function openDefaultEmailClient(subject: string, body: string): void {
+  const href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  const anchor = document.createElement('a');
+  anchor.href = href;
+  anchor.style.display = 'none';
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
