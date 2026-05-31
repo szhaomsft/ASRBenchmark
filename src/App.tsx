@@ -518,7 +518,7 @@ function App() {
 }
 
 function TurnCard({ turn, turnNumber }: { turn: Turn; turnNumber: number }) {
-  const fileName = `turn-${turnNumber}-${new Date(turn.recordedAt).toISOString().replace(/[:.]/g, '-')}.wav`;
+  const fileName = getTurnWavFileName(turn, turnNumber);
 
   return (
     <article className="turn-card">
@@ -530,11 +530,19 @@ function TurnCard({ turn, turnNumber }: { turn: Turn; turnNumber: number }) {
             {formatSeconds(turn.durationSeconds)} · {formatBytes(turn.sizeBytes)}
           </p>
         </div>
-        <a className="export-button" href={turn.audioUrl} download={fileName}>
+        <a
+          className="export-button"
+          href={turn.audioUrl}
+          download={fileName}
+          onClick={(event) => {
+            event.preventDefault();
+            downloadBlob(turn.audioBlob, fileName);
+          }}
+        >
           Export WAV
         </a>
       </div>
-      <audio src={turn.audioUrl} controls />
+      <audio src={turn.audioUrl} controls controlsList="nodownload" />
       <div className="result-grid">
         {MODELS.map((model) => (
           <ResultColumn key={model.id} model={model} result={turn.results[model.id]} />
@@ -907,6 +915,11 @@ function sanitizeFilePart(value: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 48);
   return cleaned || 'audio';
+}
+
+function getTurnWavFileName(turn: Turn, turnNumber: number): string {
+  const timestamp = new Date(turn.recordedAt).toISOString().replace(/[:.]/g, '-');
+  return `turn-${String(turnNumber).padStart(3, '0')}-${timestamp}-${sanitizeFilePart(turn.sourceName)}.wav`;
 }
 
 function calculateLatencyStats(turns: Turn[]): LatencyStats[] {
