@@ -72,7 +72,7 @@ const MODELS: SpeechModel[] = [
   {
     id: 'mai',
     name: 'MAI Transcribe',
-    description: 'MAI-Transcribe-1 through LLM Speech',
+    description: 'MAI-Transcribe-1.5 through LLM Speech',
   },
   {
     id: 'llm',
@@ -80,6 +80,8 @@ const MODELS: SpeechModel[] = [
     description: 'Enhanced transcription task',
   },
 ];
+
+const MAI_TRANSCRIBE_MODEL = 'mai-transcribe-1.5';
 
 const DEFAULT_RESULTS: Record<ModelId, ModelResult> = {
   fast: { state: 'idle' },
@@ -693,7 +695,7 @@ function buildDefinition(modelId: ModelId, language: string, includeMaiModel: bo
 
   const definition: Record<string, unknown> = {
     enhancedMode: modelId === 'mai' && includeMaiModel
-      ? { enabled: true, model: 'mai-transcribe-1' }
+      ? { enabled: true, model: MAI_TRANSCRIBE_MODEL }
       : { enabled: true, task: 'transcribe' },
   };
 
