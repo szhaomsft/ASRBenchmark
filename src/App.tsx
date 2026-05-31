@@ -78,7 +78,7 @@ const MODELS: SpeechModel[] = [
   {
     id: 'llm',
     name: 'LLM Speech',
-    description: 'Enhanced transcription task',
+    description: 'Azure LLM based STT model',
   },
   {
     id: 'elevenlabs',
