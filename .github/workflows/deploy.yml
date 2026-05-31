@@ -36,6 +36,7 @@ jobs:
         env:
           VITE_GIT_COMMIT: ${{ github.sha }}
           VITE_REPOSITORY_URL: https://github.com/szhaomsft/ASRBenchmark
+          VITE_BENCHMARK_URL: https://szhaomsft.github.io/ASRBenchmark/
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

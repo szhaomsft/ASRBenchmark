@@ -115,6 +115,7 @@ const STORAGE_KEY = 'asr-benchmark-settings';
 const WARMUP_TIMEOUT_MS = 1000;
 const WARMUP_INTERVAL_MS = 15000;
 const REPOSITORY_URL = import.meta.env.VITE_REPOSITORY_URL || 'https://github.com/szhaomsft/ASRBenchmark';
+const BENCHMARK_URL = import.meta.env.VITE_BENCHMARK_URL || 'https://szhaomsft.github.io/ASRBenchmark/';
 const GIT_COMMIT = import.meta.env.VITE_GIT_COMMIT || 'local';
 const SHORT_GIT_COMMIT = GIT_COMMIT === 'local' ? GIT_COMMIT : GIT_COMMIT.slice(0, 7);
 const COMMIT_URL = GIT_COMMIT === 'local' ? REPOSITORY_URL : `${REPOSITORY_URL}/commit/${GIT_COMMIT}`;
@@ -1045,6 +1046,7 @@ function buildBugTurnExportSummary(turn: Turn, turnNumber: number) {
     durationSeconds: turn.durationSeconds,
     sizeBytes: turn.sizeBytes,
     audioFile: 'audio.wav',
+    benchmarkUrl: BENCHMARK_URL,
     commit: GIT_COMMIT,
     commitUrl: COMMIT_URL,
     results: Object.fromEntries(
@@ -1103,6 +1105,7 @@ function formatBugResultText(summary: ReturnType<typeof buildBugTurnExportSummar
     `Recorded: ${summary.recordedAt}`,
     `Duration: ${summary.durationSeconds}s`,
     `Size: ${summary.sizeBytes} bytes`,
+    `Benchmark URL: ${summary.benchmarkUrl}`,
     `Commit: ${summary.commitUrl}`,
     '',
     'Model outputs:',
@@ -1145,6 +1148,7 @@ async function buildBugEmailDraft(
     `Turn: ${turnNumber}`,
     `Source: ${turn.sourceName}`,
     `Recorded: ${recordedAt}`,
+    `Benchmark URL: ${BENCHMARK_URL}`,
     `Commit: ${COMMIT_URL}`,
     '',
     textSummary,
