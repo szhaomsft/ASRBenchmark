@@ -170,7 +170,11 @@ function App() {
   }, []);
 
   const updateSetting = (key: keyof Settings, value: string) => {
-    setSettings((current) => ({ ...current, [key]: value }));
+    setSettings((current) => {
+      const nextSettings = { ...current, [key]: value };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSettings));
+      return nextSettings;
+    });
   };
 
   const startRecording = useCallback(async () => {
@@ -456,6 +460,8 @@ function App() {
             value={settings.apiKey}
             onChange={(event) => updateSetting('apiKey', event.target.value)}
             placeholder="Paste subscription key"
+            autoComplete="new-password"
+            spellCheck={false}
           />
         </label>
         <label>
