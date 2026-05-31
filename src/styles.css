@@ -213,7 +213,7 @@ h1 {
 
 .settings-card {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr;
+  grid-template-columns: 1.5fr 1.5fr 0.85fr 0.85fr;
   gap: 8px;
   padding: 10px;
   margin-bottom: 8px;
@@ -279,7 +279,7 @@ select {
 
 .latency-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 10px;
 }
@@ -384,7 +384,7 @@ audio {
 
 .result-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 

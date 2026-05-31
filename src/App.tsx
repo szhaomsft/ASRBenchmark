@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import JSZip from 'jszip';
 
-type ModelId = 'fast' | 'mai' | 'llm';
+type ModelId = 'fast' | 'mai' | 'llm' | 'elevenlabs';
 type ModelState = 'idle' | 'processing' | 'completed' | 'error';
 
 interface Settings {
   apiKey: string;
+  elevenLabsApiKey: string;
   region: string;
   language: string;
 }
@@ -79,14 +80,21 @@ const MODELS: SpeechModel[] = [
     name: 'LLM Speech',
     description: 'Enhanced transcription task',
   },
+  {
+    id: 'elevenlabs',
+    name: 'ElevenLabs STT',
+    description: 'Scribe v2',
+  },
 ];
 
 const MAI_TRANSCRIBE_MODEL = 'mai-transcribe-1.5';
+const ELEVENLABS_TRANSCRIBE_MODEL = 'scribe_v2';
 
 const DEFAULT_RESULTS: Record<ModelId, ModelResult> = {
   fast: { state: 'idle' },
   mai: { state: 'idle' },
   llm: { state: 'idle' },
+  elevenlabs: { state: 'idle' },
 };
 
 const FAST_TRANSCRIPTION_LANGUAGES = [
@@ -122,7 +130,7 @@ function App() {
   const recordingStartedAtRef = useRef<number>(0);
   const turnAudioUrlsRef = useRef<string[]>([]);
 
-  const isConfigured = settings.apiKey.trim().length > 0 && settings.region.trim().length > 0;
+  const isConfigured = hasAnyModelConfiguration(settings);
   const isBusy = isRecording || turns.some((turn) =>
     MODELS.some((model) => turn.results[model.id].state === 'processing'),
   );
@@ -133,19 +141,22 @@ function App() {
 
   useEffect(() => {
     const region = settings.region.trim();
-    if (!region) {
-      setWarmupText('Enter a region to warm the Azure Speech connection.');
+    if (!region && !settings.elevenLabsApiKey.trim()) {
+      setWarmupText('Enter model credentials to warm connections.');
       return;
     }
 
     let cancelled = false;
-    addPreconnectHint(getSpeechOrigin(region));
-    setWarmupText('Warming Azure Speech connection...');
+    if (region) {
+      addPreconnectHint(getSpeechOrigin(region));
+    }
+    addPreconnectHint(getElevenLabsOrigin());
+    setWarmupText('Warming model connections...');
 
     const warmAndReport = async () => {
       const warmed = await warmUpAllModelPipes(region);
       if (!cancelled) {
-        setWarmupText(warmed ? 'Azure Speech connection is warm.' : 'Warm-up attempted; browser will retry shortly.');
+        setWarmupText(warmed ? 'Model connections are warm.' : 'Warm-up attempted; browser will retry shortly.');
       }
     };
 
@@ -159,7 +170,7 @@ function App() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [settings.region]);
+  }, [settings.region, settings.elevenLabsApiKey]);
 
   useEffect(() => {
     return () => {
@@ -181,7 +192,7 @@ function App() {
 
   const startRecording = useCallback(async () => {
     if (!isConfigured) {
-      setRecordingError('Enter the Azure Speech key and region before recording.');
+      setRecordingError('Enter Azure Speech or ElevenLabs credentials before recording.');
       return;
     }
 
@@ -275,7 +286,7 @@ function App() {
     }
 
     if (!isConfigured) {
-      setRecordingError('Enter the Azure Speech key and region before uploading audio.');
+      setRecordingError('Enter Azure Speech or ElevenLabs credentials before uploading audio.');
       return;
     }
 
@@ -426,7 +437,7 @@ function App() {
           <h1>Record once, compare three transcribers side by side.</h1>
           <p className="subtitle">
             The page records microphone input, converts the turn to 16 kHz WAV, sends it to Fast
-            Transcription, MAI Transcribe, and LLM Speech in parallel, then keeps each turn in a list.
+            Transcription, MAI Transcribe, LLM Speech, and ElevenLabs STT in parallel, then keeps each turn in a list.
             Model pipes are pre-warmed and kept active to reduce first-request latency.
           </p>
         </div>
@@ -462,6 +473,17 @@ function App() {
             value={settings.apiKey}
             onChange={(event) => updateSetting('apiKey', event.target.value)}
             placeholder="Paste subscription key"
+            autoComplete="new-password"
+            spellCheck={false}
+          />
+        </label>
+        <label>
+          ElevenLabs key
+          <input
+            type="password"
+            value={settings.elevenLabsApiKey}
+            onChange={(event) => updateSetting('elevenLabsApiKey', event.target.value)}
+            placeholder="Paste ElevenLabs key"
             autoComplete="new-password"
             spellCheck={false}
           />
@@ -616,8 +638,16 @@ function Metric({ label, value }: { label: string; value: string }) {
 }
 
 async function transcribeWithModel(modelId: ModelId, audioBlob: Blob, settings: Settings): Promise<TranscriptResult> {
+  if (modelId === 'elevenlabs') {
+    return transcribeWithElevenLabs(audioBlob, settings);
+  }
+
   const region = settings.region.trim();
   const apiKey = settings.apiKey.trim();
+  if (!region || !apiKey) {
+    throw new Error('Enter the Azure Speech key and region to run this model.');
+  }
+
   const language = settings.language;
   const definition = buildDefinition(modelId, language, true);
   const endpoint = getTranscriptionEndpoint(region, modelId);
@@ -635,6 +665,41 @@ async function transcribeWithModel(modelId: ModelId, audioBlob: Blob, settings: 
   }
 }
 
+async function transcribeWithElevenLabs(audioBlob: Blob, settings: Settings): Promise<TranscriptResult> {
+  const apiKey = settings.elevenLabsApiKey.trim();
+  if (!apiKey) {
+    throw new Error('Enter the ElevenLabs API key to run this model.');
+  }
+
+  const formData = new FormData();
+  formData.append('model_id', ELEVENLABS_TRANSCRIBE_MODEL);
+  formData.append('file', audioBlob, 'audio.wav');
+  formData.append('tag_audio_events', 'true');
+  formData.append('timestamps_granularity', 'word');
+  formData.append('diarize', 'true');
+  formData.append('file_format', 'other');
+
+  const languageCode = getElevenLabsLanguageCode(settings.language);
+  if (languageCode) {
+    formData.append('language_code', languageCode);
+  }
+
+  const response = await fetch(`${getElevenLabsOrigin()}/v1/speech-to-text`, {
+    method: 'POST',
+    headers: {
+      'xi-api-key': apiKey,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const responseText = await response.text();
+    throw new Error(`ElevenLabs request failed (${response.status}): ${responseText}`);
+  }
+
+  return parseElevenLabsTranscript(await response.json(), settings.language);
+}
+
 function getTranscriptionEndpoint(region: string, modelId: ModelId): string {
   const apiVersion = modelId === 'fast' ? '2024-11-15' : '2025-10-15';
   return `${getSpeechOrigin(region)}/speechtotext/transcriptions:transcribe?api-version=${apiVersion}`;
@@ -642,6 +707,10 @@ function getTranscriptionEndpoint(region: string, modelId: ModelId): string {
 
 function getSpeechOrigin(region: string): string {
   return `https://${region}.api.cognitive.microsoft.com`;
+}
+
+function getElevenLabsOrigin(): string {
+  return 'https://api.elevenlabs.io';
 }
 
 function addPreconnectHint(origin: string): void {
@@ -663,13 +732,15 @@ function addPreconnectHint(origin: string): void {
 }
 
 async function warmUpModelPipe(modelId: ModelId, region: string): Promise<boolean> {
-  const trimmedRegion = region.trim();
-  if (!trimmedRegion) {
+  const origin = modelId === 'elevenlabs' ? getElevenLabsOrigin() : getSpeechOrigin(region.trim());
+  if (modelId !== 'elevenlabs' && !region.trim()) {
     return false;
   }
 
-  const endpoint = getTranscriptionEndpoint(trimmedRegion, modelId);
-  addPreconnectHint(getSpeechOrigin(trimmedRegion));
+  const endpoint = modelId === 'elevenlabs'
+    ? `${origin}/v1/speech-to-text`
+    : getTranscriptionEndpoint(region.trim(), modelId);
+  addPreconnectHint(origin);
 
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), WARMUP_TIMEOUT_MS);
@@ -691,7 +762,7 @@ async function warmUpModelPipe(modelId: ModelId, region: string): Promise<boolea
 
 async function warmUpAllModelPipes(region: string): Promise<boolean> {
   const results = await Promise.all(MODELS.map((model) => warmUpModelPipe(model.id, region)));
-  return results.every(Boolean);
+  return results.some(Boolean);
 }
 
 function buildDefinition(modelId: ModelId, language: string, includeMaiModel: boolean): Record<string, unknown> {
@@ -712,6 +783,10 @@ function buildDefinition(modelId: ModelId, language: string, includeMaiModel: bo
   }
 
   return definition;
+}
+
+function getElevenLabsLanguageCode(language: string): string | undefined {
+  return language === 'auto' ? undefined : language.split('-')[0].toLowerCase();
 }
 
 async function postTranscription(
@@ -838,6 +913,54 @@ function parseLegacySegments(phrases: unknown[]): TranscriptSegment[] {
       };
     })
     .filter((segment): segment is TranscriptSegment => Boolean(segment?.text));
+}
+
+function parseElevenLabsTranscript(apiResponse: unknown, requestedLanguage: string): TranscriptResult {
+  const response = isRecord(apiResponse) ? apiResponse : {};
+  const chunks = Array.isArray(response.transcripts) ? response.transcripts.filter(isRecord) : [response];
+  const transcriptChunks = chunks.filter(isRecord);
+  const fullText = transcriptChunks
+    .map((chunk) => getString(chunk.text, ''))
+    .filter(Boolean)
+    .join('\n');
+  const segments = transcriptChunks.flatMap(parseElevenLabsSegments);
+  const durationSeconds = getNumber(response.audio_duration_secs, 0);
+  const detectedLanguage = getString(transcriptChunks.find((chunk) => typeof chunk.language_code === 'string')?.language_code, requestedLanguage);
+  const duration = segments.length > 0
+    ? Math.max(...segments.map((segment) => segment.offset + segment.duration))
+    : durationSeconds * 1000;
+
+  return {
+    fullText,
+    segments,
+    language: detectedLanguage,
+    duration,
+  };
+}
+
+function parseElevenLabsSegments(chunk: Record<string, unknown>): TranscriptSegment[] {
+  const words = Array.isArray(chunk.words) ? chunk.words.filter(isRecord) : [];
+  return words
+    .map((word) => {
+      const startSeconds = getNullableNumber(word.start);
+      const endSeconds = getNullableNumber(word.end);
+      const logprob = getNullableNumber(word.logprob);
+      const speaker = typeof word.speaker_id === 'string' ? word.speaker_id : undefined;
+      const offset = startSeconds === undefined ? 0 : startSeconds * 1000;
+      const duration = startSeconds === undefined || endSeconds === undefined
+        ? 0
+        : Math.max(0, (endSeconds - startSeconds) * 1000);
+
+      return {
+        text: getString(word.text, ''),
+        offset,
+        duration,
+        confidence: logprob === undefined ? 0 : Math.max(0, Math.min(1, Math.exp(logprob))),
+        speaker,
+        locale: typeof chunk.language_code === 'string' ? chunk.language_code : undefined,
+      };
+    })
+    .filter((segment) => segment.text.trim().length > 0);
 }
 
 function buildTurnExportSummary(turn: Turn, turnNumber: number) {
@@ -1035,12 +1158,14 @@ function cloneDefaultResults(state: ModelState): Record<ModelId, ModelResult> {
     fast: { ...DEFAULT_RESULTS.fast, state },
     mai: { ...DEFAULT_RESULTS.mai, state },
     llm: { ...DEFAULT_RESULTS.llm, state },
+    elevenlabs: { ...DEFAULT_RESULTS.elevenlabs, state },
   };
 }
 
 function loadSettings(): Settings {
   const fallback = {
     apiKey: '',
+    elevenLabsApiKey: '',
     region: 'eastus',
     language: 'auto',
   };
@@ -1058,6 +1183,7 @@ function loadSettings(): Settings {
 
     return {
       apiKey: getString(parsed.apiKey, fallback.apiKey),
+      elevenLabsApiKey: getString(parsed.elevenLabsApiKey, fallback.elevenLabsApiKey),
       region: getString(parsed.region, fallback.region),
       language: getString(parsed.language, fallback.language),
     };
@@ -1066,8 +1192,17 @@ function loadSettings(): Settings {
   }
 }
 
+function hasAnyModelConfiguration(settings: Settings): boolean {
+  return (settings.apiKey.trim().length > 0 && settings.region.trim().length > 0) ||
+    settings.elevenLabsApiKey.trim().length > 0;
+}
+
 function getNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function getNullableNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function getString(value: unknown, fallback: string): string {
